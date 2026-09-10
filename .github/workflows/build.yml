@@ -1,0 +1,57 @@
+name: Build and push to Harbor
+
+on:
+  push:
+    branches:
+      - '**'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set Vault role and Harbor project
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "VAULT_ROLE=github-prod" >> $GITHUB_ENV
+            echo "HARBOR_PROJECT=service-prod" >> $GITHUB_ENV
+          else
+            echo "VAULT_ROLE=github-dev" >> $GITHUB_ENV
+            echo "HARBOR_PROJECT=service-dev" >> $GITHUB_ENV
+          fi
+
+      - name: Get GitHub OIDC token
+        run: |
+          ID_TOKEN=$(curl -sSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://github.com/dobrob1987" | jq -r '.value')
+          echo "ID_TOKEN=$ID_TOKEN" >> $GITHUB_ENV
+
+      - name: Authenticate to Vault
+        run: |
+          export VAULT_ADDR="http://158.160.169.215:8200"
+          VAULT_TOKEN=$(curl -s --request POST \
+            --data "{\"jwt\":\"$ID_TOKEN\",\"role\":\"$VAULT_ROLE\"}" \
+            $VAULT_ADDR/v1/auth/jwt/login | jq -r '.auth.client_token')
+          echo "VAULT_TOKEN=$VAULT_TOKEN" >> $GITHUB_ENV
+
+      - name: Fetch Harbor credentials
+        run: |
+          export VAULT_ADDR="http://158.160.169.215:8200"
+          RESPONSE=$(curl -s --header "X-Vault-Token: $VAULT_TOKEN" \
+            $VAULT_ADDR/v1/secret/data/harbor/$HARBOR_PROJECT)
+          HARBOR_USER=$(echo $RESPONSE | jq -r '.data.data.username')
+          HARBOR_PASS=$(echo $RESPONSE | jq -r '.data.data.password')
+          echo "::add-mask::$HARBOR_PASS"
+          echo "HARBOR_USER=$HARBOR_USER" >> $GITHUB_ENV
+          echo "HARBOR_PASS=$HARBOR_PASS" >> $GITHUB_ENV
+
+      - name: Build and push image
+        run: |
+          echo "$HARBOR_PASS" | docker login harbor.company.com -u "$HARBOR_USER" --password-stdin
+          docker build -t harbor.company.com/$HARBOR_PROJECT/app:${{ github.sha }} .
+          docker push harbor.company.com/$HARBOR_PROJECT/app:${{ github.sha }}
