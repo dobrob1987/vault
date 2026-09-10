@@ -50,8 +50,6 @@ jobs:
           echo "HARBOR_USER=$HARBOR_USER" >> $GITHUB_ENV
           echo "HARBOR_PASS=$HARBOR_PASS" >> $GITHUB_ENV
 
-      - name: Build and push image
+      - name: Show fetched credentials (debug, remove later)
         run: |
-          echo "$HARBOR_PASS" | docker login harbor.company.com -u "$HARBOR_USER" --password-stdin
-          docker build -t harbor.company.com/$HARBOR_PROJECT/app:${{ github.sha }} .
-          docker push harbor.company.com/$HARBOR_PROJECT/app:${{ github.sha }}
+          echo "Got Harbor user: $HARBOR_USER"
